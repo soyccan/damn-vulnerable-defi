@@ -6,6 +6,8 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/utils/Address.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 
+import "hardhat/console.sol";
+
 /**
  * @title TrusterLenderPool
  * @author Damn Vulnerable DeFi (https://damnvulnerabledefi.xyz)
@@ -29,10 +31,17 @@ contract TrusterLenderPool is ReentrancyGuard {
         external
         nonReentrant
     {
+        console.log("%s made a flash loan", msg.sender);
+
         uint256 balanceBefore = damnValuableToken.balanceOf(address(this));
         require(balanceBefore >= borrowAmount, "Not enough tokens in pool");
         
         damnValuableToken.transfer(borrower, borrowAmount);
+        // ATTACK POINT: The lender trusts any function from any contract.
+        // Since this call is initiated by the lender, an attacker can leverage
+        // the lender's privilege.
+        // A normal approach is to require borrowers to implement a specific
+        // repayment function. https://eips.ethereum.org/EIPS/eip-3156
         target.functionCall(data);
 
         uint256 balanceAfter = damnValuableToken.balanceOf(address(this));
