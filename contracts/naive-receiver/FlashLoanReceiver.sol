@@ -4,6 +4,8 @@ pragma solidity ^0.8.0;
 
 import "@openzeppelin/contracts/utils/Address.sol";
 
+import "hardhat/console.sol";
+
 /**
  * @title FlashLoanReceiver
  * @author Damn Vulnerable DeFi (https://damnvulnerabledefi.xyz)
@@ -27,7 +29,11 @@ contract FlashLoanReceiver {
         
         _executeActionDuringFlashLoan();
         
+        console.log("%s paying back %s to %s", address(this), amountToBeRepaid, pool);
+
         // Return funds to pool
+        // ATTACK POINT: This user overtrusts the pool, paying back whenever
+        // the pool demands, not checking if he really borrowed the loan consciously.
         pool.sendValue(amountToBeRepaid);
     }
 

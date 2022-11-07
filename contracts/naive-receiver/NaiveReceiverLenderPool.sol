@@ -4,6 +4,8 @@ pragma solidity ^0.8.0;
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/Address.sol";
 
+import "hardhat/console.sol";
+
 /**
  * @title NaiveReceiverLenderPool
  * @author Damn Vulnerable DeFi (https://damnvulnerabledefi.xyz)
@@ -18,6 +20,9 @@ contract NaiveReceiverLenderPool is ReentrancyGuard {
         return FIXED_FEE;
     }
 
+    // ATTACK POINT: The borrower is specified in the parameter, so that an
+    // attacker may borrow loans for anyone who uses this pool without his
+    // consent, and the fees will bankrupt him.
     function flashLoan(address borrower, uint256 borrowAmount) external nonReentrant {
 
         uint256 balanceBefore = address(this).balance;
@@ -26,6 +31,10 @@ contract NaiveReceiverLenderPool is ReentrancyGuard {
 
         require(borrower.isContract(), "Borrower must be a deployed contract");
         // Transfer ETH and handle control to receiver
+        console.log("%s called flashLoan(borrower=%s, amount=%s)",
+                    msg.sender,
+                    borrower,
+                    borrowAmount);
         borrower.functionCallWithValue(
             abi.encodeWithSignature(
                 "receiveEther(uint256)",
