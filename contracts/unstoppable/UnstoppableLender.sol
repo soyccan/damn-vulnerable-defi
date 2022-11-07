@@ -37,6 +37,9 @@ contract UnstoppableLender is ReentrancyGuard {
         require(balanceBefore >= borrowAmount, "Not enough tokens in pool");
 
         // Ensured by the protocol via the `depositTokens` function
+        // ATTACK POINT: this will fail forever once we transfer some token 
+        // to the pool not by `depositeTokens` function
+        // Reference: https://github.com/crytic/slither/wiki/Detector-Documentation#dangerous-strict-equalities
         assert(poolBalance == balanceBefore);
         
         damnValuableToken.transfer(msg.sender, borrowAmount);
