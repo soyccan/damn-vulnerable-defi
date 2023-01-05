@@ -27,7 +27,7 @@ contract TheRewarderPool {
     // Token used for internal accounting and snapshots
     // Pegged 1:1 with the liquidity token
     AccountingToken public accToken;
-    
+
     // Token in which rewards are issued
     RewardToken public immutable rewardToken;
 
@@ -48,7 +48,7 @@ contract TheRewarderPool {
      */
     function deposit(uint256 amountToDeposit) external {
         require(amountToDeposit > 0, "Must deposit tokens");
-        
+
         accToken.mint(msg.sender, amountToDeposit);
         distributeRewards();
 
@@ -67,12 +67,15 @@ contract TheRewarderPool {
 
         if(isNewRewardsRound()) {
             _recordSnapshot();
-        }        
-        
+        }
+
         uint256 totalDeposits = accToken.totalSupplyAt(lastSnapshotIdForRewards);
         uint256 amountDeposited = accToken.balanceOfAt(msg.sender, lastSnapshotIdForRewards);
 
         if (amountDeposited > 0 && totalDeposits > 0) {
+            // ATTACK POINT: Rewards are determined by the ratio of the user's
+            // deposit in the pool, but that can be temporarily tilted through
+            // flash loans
             rewards = (amountDeposited * 100 * 10 ** 18) / totalDeposits;
 
             if(rewards > 0 && !_hasRetrievedReward(msg.sender)) {
@@ -81,7 +84,7 @@ contract TheRewarderPool {
             }
         }
 
-        return rewards;     
+        return rewards;
     }
 
     function _recordSnapshot() private {

