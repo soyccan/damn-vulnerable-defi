@@ -55,6 +55,7 @@ contract TrustfulOracle is AccessControlEnumerable {
         _setPrice(msg.sender, symbol, newPrice);
     }
 
+    // ATTACK POINT: using median price allows 51% attack on the oracles
     function getMedianPrice(string calldata symbol) external view returns (uint256) {
         return _computeMedianPrice(symbol);
     }
