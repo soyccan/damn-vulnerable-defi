@@ -43,7 +43,7 @@ contract FreeRiderNFTMarketplace is ReentrancyGuard {
         uint256 amount = tokenIds.length;
         if (amount == 0)
             revert InvalidTokensAmount();
-            
+
         if (amount != prices.length)
             revert InvalidPricesAmount();
 
@@ -100,6 +100,8 @@ contract FreeRiderNFTMarketplace is ReentrancyGuard {
         _token.safeTransferFrom(_token.ownerOf(tokenId), msg.sender, tokenId);
 
         // pay seller using cached token
+        // ATTACK POINT: now the token owner becomes the buyer, so this is sending
+        // value back to the buyer, resulting in a free ride
         payable(_token.ownerOf(tokenId)).sendValue(priceToPay);
 
         emit NFTBought(msg.sender, tokenId, priceToPay);
