@@ -85,6 +85,9 @@ contract WalletRegistry is IProxyCreationCallback, Ownable {
         }
 
         // Ensure initial calldata was a call to `GnosisSafe::setup`
+        // ATTACK POINT: arguments for GnosisSafe::setup is not validated, while
+        // there is a setup module argument where an attacker can leverage to
+        // achieve arbitrary external call
         if (bytes4(initializer[:4]) != GnosisSafe.setup.selector) {
             revert InvalidInitialization();
         }

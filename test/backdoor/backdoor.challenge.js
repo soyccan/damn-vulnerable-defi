@@ -1,5 +1,10 @@
-const { ethers } = require('hardhat');
+const { ethers, tracer } = require('hardhat');
 const { expect } = require('chai');
+
+function setTracerTag(addr, name) {
+    if (tracer)
+        tracer.nameTags[addr] = name;
+}
 
 describe('[Challenge] Backdoor', function () {
     let deployer, users, player;
@@ -11,12 +16,18 @@ describe('[Challenge] Backdoor', function () {
         /** SETUP SCENARIO - NO NEED TO CHANGE ANYTHING HERE */
         [deployer, alice, bob, charlie, david, player] = await ethers.getSigners();
         users = [alice.address, bob.address, charlie.address, david.address]
+        setTracerTag(deployer.address, "Deployer");
+        setTracerTag(alice.address, "Alice");
+        setTracerTag(bob.address, "Bob");
+        setTracerTag(charlie.address, "Charlie");
+        setTracerTag(david.address, "David");
+        setTracerTag(player.address, "Player");
 
         // Deploy Gnosis Safe master copy and factory contracts
         masterCopy = await (await ethers.getContractFactory('GnosisSafe', deployer)).deploy();
         walletFactory = await (await ethers.getContractFactory('GnosisSafeProxyFactory', deployer)).deploy();
         token = await (await ethers.getContractFactory('DamnValuableToken', deployer)).deploy();
-        
+
         // Deploy the registry
         walletRegistry = await (await ethers.getContractFactory('WalletRegistry', deployer)).deploy(
             masterCopy.address,
@@ -46,6 +57,16 @@ describe('[Challenge] Backdoor', function () {
 
     it('Execution', async function () {
         /** CODE YOUR SOLUTION HERE */
+        console.log("\n=== Exploit Begin ===\n");
+
+        const attackerContract = await (
+            await ethers.getContractFactory('WalletRegistryAttacker', player)
+        ).deploy();
+
+        // TODO: debug why the execution failed with 4 users
+        await attackerContract.attack(walletRegistry.address, users.slice(0, 2), { gasLimit: 1e6 });
+
+        console.log("\n=== Exploit End ===\n");
     });
 
     after(async function () {
@@ -56,7 +77,7 @@ describe('[Challenge] Backdoor', function () {
 
         for (let i = 0; i < users.length; i++) {
             let wallet = await walletRegistry.wallets(users[i]);
-            
+
             // User must have registered a wallet
             expect(wallet).to.not.eq(
                 ethers.constants.AddressZero,
