@@ -92,6 +92,8 @@ contract ClimberTimelock is ClimberTimelockBase {
             }
         }
 
+        // ATTACK POINT: checks-effects-interactions is violated
+        // checks are performed after the external calls are executed
         if (getOperationState(id) != OperationState.ReadyForExecution) {
             revert NotReadyForExecution(id);
         }
