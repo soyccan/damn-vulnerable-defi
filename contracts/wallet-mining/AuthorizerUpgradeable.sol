@@ -14,6 +14,9 @@ contract AuthorizerUpgradeable is Initializable, OwnableUpgradeable, UUPSUpgrade
 
     event Rely(address indexed usr, address aim);
 
+    // VULNERABILITY: As the implementation contract of a proxiable contract, this contract should
+    // be initialized by calling this initializer. Otherwise, anyone may initialize and become the
+    // owner.
     function init(address[] memory _wards, address[] memory _aims) external initializer {
         __Ownable_init();
         __UUPSUpgradeable_init();
@@ -35,6 +38,9 @@ contract AuthorizerUpgradeable is Initializable, OwnableUpgradeable, UUPSUpgrade
         return wards[usr][aim] == 1;
     }
 
+    // VULNERABILITY: `onlyProxy` modifier is not used, so the implementation contract can be
+    // upgraded through this function by the owner. This combined with an uninitialized state is
+    // results in UUPSUpgradeable vulnerability.
     function upgradeToAndCall(address imp, bytes memory wat) external payable override {
         _authorizeUpgrade(imp);
         _upgradeToAndCallUUPS(imp, wat, true);

