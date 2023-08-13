@@ -4,21 +4,13 @@ const factoryJson = require("../../build-uniswap-v1/UniswapV1Factory.json");
 const { ethers, tracer } = require('hardhat');
 const { expect } = require('chai');
 const { setBalance } = require("@nomicfoundation/hardhat-network-helpers");
+const { setTracerTag, waitForTx } = require("../common/utils");
 
 const fs = require('fs');
 
 // Calculates how much ETH (in wei) Uniswap will pay for the given amount of tokens
 function calculateTokenToEthInputPrice(tokensSold, tokensInReserve, etherInReserve) {
     return (tokensSold * 997n * etherInReserve) / (tokensInReserve * 1000n + tokensSold * 997n);
-}
-
-function setTracerTag(addr, name) {
-    if (tracer)
-        tracer.nameTags[addr] = name;
-}
-
-async function waitForTx(promiseOfTransactionResp) {
-    return await (await promiseOfTransactionResp).wait();
 }
 
 describe('[Challenge] Puppet', function () {

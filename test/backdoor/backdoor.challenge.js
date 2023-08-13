@@ -1,10 +1,6 @@
-const { ethers, tracer } = require('hardhat');
+const { ethers } = require('hardhat');
 const { expect } = require('chai');
-
-function setTracerTag(addr, name) {
-    if (tracer)
-        tracer.nameTags[addr] = name;
-}
+const { setTracerTag } = require("../common/utils");
 
 describe('[Challenge] Backdoor', function () {
     let deployer, users, player;

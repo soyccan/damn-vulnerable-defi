@@ -5,13 +5,9 @@ const routerJson = require("@uniswap/v2-periphery/build/UniswapV2Router02.json")
 const { ethers, tracer } = require('hardhat');
 const { expect } = require('chai');
 const { setBalance } = require("@nomicfoundation/hardhat-network-helpers");
+const { setTracerTag } = require("../common/utils");
 
 const fs = require('fs');
-
-function setTracerTag(addr, name) {
-    if (tracer)
-        tracer.nameTags[addr] = name;
-}
 
 describe('[Challenge] Puppet v2', function () {
     let deployer, player;

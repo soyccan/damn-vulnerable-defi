@@ -1,12 +1,8 @@
 const { ethers, upgrades, tracer } = require('hardhat');
 const { expect } = require('chai');
+const { setTracerTag } = require("../common/utils");
 const Safe = require("@gnosis.pm/safe-contracts");
 const DeployData = require("./deploy-data.json");
-
-function setTracerTag(addr, name) {
-    if (tracer)
-        tracer.nameTags[addr] = name;
-}
 
 describe('[Challenge] Wallet mining', function () {
     let deployer, player;

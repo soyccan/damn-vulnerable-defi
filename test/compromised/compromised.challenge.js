@@ -1,6 +1,7 @@
 const { expect } = require('chai');
-const { ethers, tracer } = require('hardhat');
+const { ethers } = require('hardhat');
 const { setBalance } = require('@nomicfoundation/hardhat-network-helpers');
+const { setTracerTag } = require("../common/utils");
 
 describe('Compromised challenge', function () {
     let deployer, player;
@@ -20,20 +21,14 @@ describe('Compromised challenge', function () {
     before(async function () {
         /** SETUP SCENARIO - NO NEED TO CHANGE ANYTHING HERE */
         [deployer, player] = await ethers.getSigners();
-
-        if (tracer) {
-            tracer.nameTags[deployer.address] = "Deployer";
-            tracer.nameTags[player.address] = "Player";
-        }
+        setTracerTag(deployer.address, "Deployer");
+        setTracerTag(player.address, "Player");
 
         // Initialize balance of the trusted source addresses
         for (let i = 0; i < sources.length; i++) {
             setBalance(sources[i], TRUSTED_SOURCE_INITIAL_ETH_BALANCE);
             expect(await ethers.provider.getBalance(sources[i])).to.equal(TRUSTED_SOURCE_INITIAL_ETH_BALANCE);
-
-            if (tracer) {
-                tracer.nameTags[sources[i]] = "Source" + i;
-            }
+            setTracerTag(sources[i], `Source ${i}`);
         }
 
         // Player starts with limited balance
@@ -61,12 +56,9 @@ describe('Compromised challenge', function () {
         expect(await nftToken.owner()).to.eq(ethers.constants.AddressZero); // ownership renounced
         expect(await nftToken.rolesOf(exchange.address)).to.eq(await nftToken.MINTER_ROLE());
 
-        if (tracer) {
-            tracer.nameTags[oracle.address] = "Oracle";
-            tracer.nameTags[exchange.address] = "Exchange";
-            tracer.nameTags[nftToken.address] = "NFT";
-            console.log(tracer.nameTags);
-        }
+        setTracerTag(oracle.address, "Oracle");
+        setTracerTag(exchange.address, "Exchange");
+        setTracerTag(nftToken.address, "NFT");
     });
 
     it('Execution', async function () {
