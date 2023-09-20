@@ -5,6 +5,10 @@ const path = require("node:path");
 const { tracer } = require("hardhat");
 const { parseFullyQualifiedName } = require("hardhat/utils/contract-names");
 
+let defaultSigner;
+
+const setDefaultSigner = signer => { defaultSigner = signer; }
+
 const setTracerTag = (address, name) => {
     console.log(`${address}: ${name}`);
     if (!tracer)
@@ -52,7 +56,25 @@ const setTracerArtifactName = async (address, name, modulePath = undefined) => {
     await copyFileEnsureDir(srcArtifactPath, artifactPath);
 }
 
-const waitForTx = async promiseOfTxResp => await (await promiseOfTxResp).wait();
+const getMutability = (contract, method) =>
+    // may be "pure", "view", "nonpayable" or "payable"
+    contract.interface.functions[contract.interface.getFunction(method).format()].stateMutability;
+
+const callContract = async (contract, method, args, signer) => {
+    signer = signer ?? defaultSigner ?? (await ethers.getSigners())[0];
+    let tx = await contract.connect(signer)[method](...(args ?? []));
+    if (getMutability(contract, method) == "view")
+        return tx;
+    return await tx.wait();
+}
+
+const deployContract = async (name, args, deployer) => {
+    deployer = deployer ?? defaultSigner ?? (await ethers.getSigners())[0];
+    let contractFactory = await ethers.getContractFactory(name, deployer);
+    let contract = await contractFactory.deploy(...args);
+    await contract.deployTransaction.wait();
+    return contract;
+}
 
 const copyFileEnsureDir = async (src, dest) => {
     try {
@@ -65,8 +87,11 @@ const copyFileEnsureDir = async (src, dest) => {
 }
 
 module.exports = {
+    setDefaultSigner,
     setTracerTag,
     setTracerArtifactName,
-    waitForTx,
+    getMutability,
+    callContract,
+    deployContract,
     copyFileEnsureDir,
 };
