@@ -15,7 +15,10 @@ def parse_args(args):
     i = 0
     while i < len(args):
         c = args[i]
-        # print(f"{nest=} {i=} {c=} {args[:i+1]=}")
+        if c == "\x1b":
+            c = args[i : args.find("m", i) + 1]
+
+        # print(f"{nest=} {i=} {c=} {args[:i]=}")
         match c:
             case "=":
                 yield args[:i].strip()
@@ -35,7 +38,7 @@ def parse_args(args):
 
             case ")" | "]":
                 assert nest.pop() == {")": "(", "]": "["}[c]
-        i += 1
+        i += len(c)
 
     yield args.strip()
 
