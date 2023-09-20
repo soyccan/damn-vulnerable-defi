@@ -13,10 +13,19 @@ const setTracerTag = (address, name) => {
     tracer.nameTags[address] = name;
 }
 
-const setTracerArtifactName = async (address, name) => {
+const setTracerArtifactName = async (address, name, modulePath = undefined) => {
     console.log(`${address} => ${name}`);
     if (!tracer)
         return;
+
+    // Example:
+    //   name: "@uniswap/v3-core/contracts/UniswapV3Factory.sol:UniswapV3Factory"
+    //   sourceName: "@uniswap/v3-core/contracts/UniswapV3Factory.sol"
+    //   contractName: "UniswapV3Factory"
+    //   moduleName: "@uniswap/v3-core"
+    //   modulePath: "contracts/UniswapV3Factory.sol"
+    //   srcArtifactPath: "node_modules/@uniswap/v3-core/artifacts/contracts/UniswapV3Factory.sol/UniswapV3Factory.json"
+    //   artifactPath: "artifacts/@uniswap/v3-core/contracts/UniswapV3Factory.sol/UniswapV3Factory.json"
 
     let { sourceName, contractName } = parseFullyQualifiedName(name);
     setTracerTag(address, contractName);
@@ -27,26 +36,16 @@ const setTracerArtifactName = async (address, name) => {
     if (fs.existsSync(artifactPath))
         return;
 
-    // Example:
-    //   name: "@uniswap/v3-core/contracts/UniswapV3Factory.sol:UniswapV3Factory"
-    //   sourceName: "@uniswap/v3-core/contracts/UniswapV3Factory"
-    //   contractName: "UniswapV3Factory"
-    //   moduleName: "@uniswap/v3-core"
-    //   modulePath: "contracts/UniswapV3Factory.sol"
-    //   srcArtifactPath: "node_modules/@uniswap/v3-core/artifacts/contracts/UniswapV3Factory.sol/UniswapV3Factory.json"
-    //   artifactPath: "artifacts/@uniswap/v3-core/contracts/UniswapV3Factory.sol/UniswapV3Factory.json"
     let sourceNameSplits = sourceName.split("/");
-
     let moduleName = sourceNameSplits.shift();
     if (moduleName.startsWith("@"))
         moduleName = path.join(moduleName, sourceNameSplits.shift());
 
-    let modulePath = sourceNameSplits.join("/");
+    modulePath = modulePath ?? path.join("artifacts", ...sourceNameSplits);
     let srcArtifactPath = path.join(
         process.cwd(),
         "node_modules",
         moduleName,
-        "artifacts",
         modulePath,
         `${contractName}.json`
     );

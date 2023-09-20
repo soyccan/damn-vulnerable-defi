@@ -2,12 +2,10 @@ const pairJson = require("@uniswap/v2-core/build/UniswapV2Pair.json");
 const factoryJson = require("@uniswap/v2-core/build/UniswapV2Factory.json");
 const routerJson = require("@uniswap/v2-periphery/build/UniswapV2Router02.json");
 
-const { ethers, tracer } = require('hardhat');
+const { ethers } = require('hardhat');
 const { expect } = require('chai');
 const { setBalance } = require("@nomicfoundation/hardhat-network-helpers");
-const { setTracerTag } = require("../common/utils");
-
-const fs = require('fs');
+const { setTracerTag, setTracerArtifactName } = require("../common/utils");
 
 describe('[Challenge] Puppet v2', function () {
     let deployer, player;
@@ -35,15 +33,6 @@ describe('[Challenge] Puppet v2', function () {
         const UniswapRouterFactory = new ethers.ContractFactory(routerJson.abi, routerJson.bytecode, deployer);
         const UniswapPairFactory = new ethers.ContractFactory(pairJson.abi, pairJson.bytecode, deployer);
 
-        // hack: copy the library ABIs & bytecodes into the artifact dir so that
-        // hardhat-tracer can recognize these contracts whose source code is absent
-        if (tracer) {
-            try { fs.mkdirSync('artifacts/uniswap-v2'); } catch {}
-            fs.copyFileSync('node_modules/@uniswap/v2-core/build/UniswapV2Pair.json', 'artifacts/uniswap-v2/UniswapV2Pair.json');
-            fs.copyFileSync('node_modules/@uniswap/v2-core/build/UniswapV2Factory.json', 'artifacts/uniswap-v2/UniswapV2Factory.json');
-            fs.copyFileSync('node_modules/@uniswap/v2-periphery/build/UniswapV2Router02.json', 'artifacts/uniswap-v2/UniswapV2Router02.json');
-        }
-
         // Deploy tokens to be traded
         token = await (await ethers.getContractFactory('DamnValuableToken', deployer)).deploy();
         weth = await (await ethers.getContractFactory('WETH', deployer)).deploy();
@@ -54,6 +43,8 @@ describe('[Challenge] Puppet v2', function () {
             uniswapFactory.address,
             weth.address
         );
+        await setTracerArtifactName(uniswapFactory.address, "@uniswap/v2-core:UniswapV2Factory", modulePath = "build");
+        await setTracerArtifactName(uniswapRouter.address, "@uniswap/v2-periphery:UniswapV2Router02", modulePath = "build");
 
         // Create Uniswap pair against WETH and add liquidity
         await token.approve(
@@ -72,6 +63,7 @@ describe('[Challenge] Puppet v2', function () {
         uniswapExchange = UniswapPairFactory.attach(
             await uniswapFactory.getPair(token.address, weth.address)
         );
+        await setTracerArtifactName(uniswapExchange.address, "@uniswap/v2-core:UniswapV2Pair", modulePath = "build");
         expect(await uniswapExchange.balanceOf(deployer.address)).to.be.gt(0);
 
         // Deploy the lending pool
